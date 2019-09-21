@@ -1,67 +1,115 @@
 # gocache-client
 
 
-## Initialize your project
+This code dependent on referenced modules - [go-cache](https://github.com/patrickmn/go-cache)
+
+## sample
+
+[example](https://github.com/sillyhatxu/gocache-client/blob/master/client_test.go)
+
+## new cache client
 
 ```
-dep init
+var Client = NewCacheConfig(Expiration(5*time.Second), CleanupInterval(10*time.Second))
 ```
 
-## Adding a dependency
+
+## Demo
 
 ```
-dep ensure -add github.com/foo/bar github.com/foo/baz...
+func TestCache(t *testing.T) {
+	value, found := Client.Get("test1")
+	assert.EqualValues(t, found, false)
+	assert.Nil(t, value)
+	Client.SetWithExpiration("test1", "test1-haha", DefaultExpiration)
+	Client.SetWithExpiration("test2", "test2-lala", NoExpiration)
 
-dep ensure -add github.com/foo/bar@1.0.0 github.com/foo/baz@master
-```
+	value, found = Client.Get("test1")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test1-haha")
 
-## Updating dependencies
+	value, found = Client.Get("test2")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test2-lala")
 
-```
-dep ensure -update github.com/sillyhatxu/convenient-utils
+	member := &UserInfo{Id: "ID_2222", MobileNumber: "m_555555", Name: "m_test", Paid: false, FirstActionDeviceId: "m_deviceid", TestNumber: 11, TestNumber64: 22, TestDate: time.Now()}
+	userinfo := &UserInfo{Id: "ID_1001", MobileNumber: "555555", Name: "test", Paid: true, FirstActionDeviceId: "deviceid", TestNumber: 10, TestNumber64: 64, TestDate: time.Now(), Member: member}
+	Client.SetWithExpiration("test-object", userinfo, NoExpiration)
+	time.Sleep(6 * time.Second)
 
-dep ensure -update
-```
+	value, found = Client.Get("test1")
+	assert.EqualValues(t, found, false)
+	assert.Nil(t, value)
 
-## build
+	value, found = Client.Get("test2")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test2-lala")
 
-```
-docker build -f application-api/Dockerfile .
-```
+	value, found = Client.Get("test-object")
+	assert.EqualValues(t, found, true)
+	result := value.(*UserInfo)
+	assert.EqualValues(t, result, userinfo)
 
-## alpine-build Dockerfile
+	Client.SetWithExpiration("test3", "test3-heihei", DefaultExpiration)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test3-heihei")
+	time.Sleep(1 * time.Second)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test3-heihei")
+	time.Sleep(1 * time.Second)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test3-heihei")
+	time.Sleep(1 * time.Second)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test3-heihei")
+	time.Sleep(1 * time.Second)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, true)
+	assert.EqualValues(t, value, "test3-heihei")
+	time.Sleep(1 * time.Second)
+	value, found = Client.Get("test3")
+	assert.EqualValues(t, found, false)
+	assert.Nil(t, value)
+}
 
-```
-FROM alpine
+func TestStuctCache(t *testing.T) {
+	member := &UserInfo{Id: "ID_2222", MobileNumber: "m_555555", Name: "m_test", Paid: false, FirstActionDeviceId: "m_deviceid", TestNumber: 11, TestNumber64: 22, TestDate: time.Now()}
+	userinfo := &UserInfo{Id: "ID_1001", MobileNumber: "555555", Name: "test", Paid: true, FirstActionDeviceId: "deviceid", TestNumber: 10, TestNumber64: 64, TestDate: time.Now(), Member: member}
 
-RUN apk add --no-cache tzdata
-RUN apk --update --no-cache add curl
-RUN apk add --no-cache ca-certificates
-```
+	Client.SetWithExpiration("test-object", userinfo, NoExpiration)
 
-## alpine-build build
+	value, found := Client.Get("test-object")
+	assert.EqualValues(t, found, true)
+	result := value.(*UserInfo)
+	assert.EqualValues(t, result, userinfo)
+}
 
-```
-docker build -t xushikuan/temp-backend .
-docker tag xushikuan/temp-backend:latest xushikuan/temp-backend:1.0
-docker push xushikuan/temp-backend:1.0
-```
-
-# Release Template
-
-### Feature
-
-* [NEW] Support for Go Modules [#17](https://github.com/sillyhatxu/convenient-utils/issues/17)
-
----
-
-### Bug fix
-
-* [FIX] Truncate Latency precision in long running request [#17](https://github.com/sillyhatxu/convenient-utils/issues/17)
-
-###
-
-```
-git tag v1.0.0
-git push origin v1.0.0
+func TestCacheClient_IncrementInt64(t *testing.T) {
+	go func() {
+		for i := 0; i < 200; i++ {
+			result, err := Client.IncrementInt64WithExpiration("test", 2*time.Second)
+			assert.Nil(t, err)
+			log.Printf(fmt.Sprintf("result : %d", result))
+			time.Sleep(200 * time.Millisecond)
+		}
+	}()
+	go func() {
+		for i := 0; i < 200; i++ {
+			result, err := Client.IncrementInt64WithExpiration("test", 2*time.Second)
+			assert.Nil(t, err)
+			log.Printf(fmt.Sprintf("result : %d", result))
+			time.Sleep(200 * time.Millisecond)
+		}
+	}()
+	for i := 0; i < 300; i++ {
+		result, err := Client.IncrementInt64WithExpiration("test", 2*time.Second)
+		assert.Nil(t, err)
+		log.Printf(fmt.Sprintf("result : %d", result))
+		time.Sleep(200 * time.Millisecond)
+	}
+}
 ```
