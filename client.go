@@ -1,128 +1,188 @@
 package cacheclient
 
 import (
-	"github.com/patrickmn/go-cache"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"github.com/allegro/bigcache"
 	"sync"
 	"time"
 )
 
 const (
-	NoExpiration           = cache.NoExpiration
-	DefaultExpiration      = cache.DefaultExpiration
-	defaultExpiration      = 24 * time.Hour
-	defaultCleanupInterval = 25 * time.Hour
+	defaultShards             = 2048
+	defaultLifeWindow         = 24 * time.Hour
+	defaultCleanWindow        = 12 * time.Hour
+	defaultMaxEntriesInWindow = 1000 * 10 * 60
+	defaultMaxEntrySize       = 500
+	defaultVerbose            = true
+	defaultHardMaxCacheSize   = 8192
+	defaultHasher             = ""
+	//defaultLogger             = bigcache.DefaultLogger()
+	//defaultOnRemove           = ""
+	//defaultOnRemoveWithReason = ""
+	//defaultOnRemoveFilter     = ""
 )
 
 type CacheClient struct {
-	config *Config
-	client *cache.Cache
+	client *bigcache.BigCache
+	config *bigcache.Config
 	mu     sync.Mutex
 }
 
-func NewCacheClient(opts ...Option) *CacheClient {
+func NewCacheClient(opts ...Option) (*CacheClient, error) {
 	//default
 	config := &Config{
-		expiration:      defaultExpiration,
-		cleanupInterval: defaultCleanupInterval,
+		shards:             defaultShards,
+		lifeWindow:         defaultLifeWindow,
+		cleanWindow:        defaultCleanWindow,
+		maxEntriesInWindow: defaultMaxEntriesInWindow,
+		maxEntrySize:       defaultMaxEntrySize,
+		verbose:            defaultVerbose,
+		hardMaxCacheSize:   defaultHardMaxCacheSize,
+		logger:             bigcache.DefaultLogger(),
+		//hasher:             defaultHasher,
+		//onRemove:           defaultOnRemove,
+		//onRemoveWithReason: defaultOnRemoveWithReason,
+		//onRemoveFilter:     defaultOnRemoveFilter,
 	}
 	for _, opt := range opts {
 		opt(config)
 	}
+
+	bigcacheConfig := bigcache.Config{
+		Shards:             config.shards,
+		LifeWindow:         config.lifeWindow,
+		CleanWindow:        config.cleanWindow,
+		MaxEntriesInWindow: config.maxEntriesInWindow,
+		MaxEntrySize:       config.maxEntrySize,
+		Verbose:            config.verbose,
+		HardMaxCacheSize:   config.hardMaxCacheSize,
+		Logger:             config.logger,
+		//Hasher:             config.hasher,
+		//OnRemove:           config.onRemove,
+		//OnRemoveWithReason: config.onRemoveWithReason,
+		//onRemoveFilter:     config.onRemoveFilter,
+	}
+	cache, err := bigcache.NewBigCache(bigcacheConfig)
+	if err != nil {
+		return nil, err
+	}
 	return &CacheClient{
-		config: config,
-		client: cache.New(config.expiration, config.cleanupInterval),
-	}
+		client: cache,
+		config: &bigcacheConfig,
+	}, nil
 }
 
-func (cc CacheClient) getClient() *cache.Cache {
+func (cc CacheClient) getClient() (*bigcache.BigCache, error) {
 	if cc.client == nil {
-		return cache.New(cc.config.expiration, cc.config.cleanupInterval)
+		c, err := bigcache.NewBigCache(*cc.config)
+		if err != nil {
+			return nil, err
+		}
+		cc.client = c
+		return cc.client, nil
 	}
-	return cc.client
+	return cc.client, nil
 }
 
-func (cc CacheClient) Get(key string) (interface{}, bool) {
-	return cc.getClient().Get(key)
+func (cc CacheClient) SetSrc(key string, value string) error {
+	return cc.Set(key, []byte(value))
 }
 
-func (cc CacheClient) Delete(key string) {
-	cc.getClient().Delete(key)
+func (cc CacheClient) GetSrc(key string) (string, error) {
+	body, err := cc.Get(key)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
-func (cc CacheClient) Set(key string, value interface{}) {
-	cc.getClient().Set(key, value, NoExpiration)
+func (cc CacheClient) SetObj(key string, value interface{}) error {
+	bodyJSON, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("value to byte error. %v", err)
+	}
+	return cc.Set(key, bodyJSON)
 }
 
-func (cc CacheClient) IncrementInt(k string) (int, error) {
-	return cc.IncrementIntWithExpiration(k, NoExpiration)
+func (cc CacheClient) GetObj(key string, value interface{}) error {
+	body, err := cc.Get(key)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(body, &value)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (cc CacheClient) IncrementInt8(k string) (int8, error) {
-	return cc.IncrementInt8WithExpiration(k, NoExpiration)
+func (cc CacheClient) Get(key string) ([]byte, error) {
+	client, err := cc.getClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.Get(key)
 }
 
-func (cc CacheClient) IncrementInt16(k string) (int16, error) {
-	return cc.IncrementInt16WithExpiration(k, NoExpiration)
-}
-
-func (cc CacheClient) IncrementInt32(k string) (int32, error) {
-	return cc.IncrementInt32WithExpiration(k, NoExpiration)
-}
-
-func (cc CacheClient) IncrementInt64(k string) (int64, error) {
-	return cc.IncrementInt64WithExpiration(k, NoExpiration)
-}
-
-func (cc CacheClient) SetWithExpiration(key string, value interface{}, d time.Duration) {
-	cc.getClient().Set(key, value, d)
-}
-
-func (cc CacheClient) IncrementIntWithExpiration(k string, d time.Duration) (int, error) {
+func (cc CacheClient) Set(key string, value []byte) error {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
-	_, b := cc.Get(k)
-	if !b {
-		cc.SetWithExpiration(k, int(0), d)
+	client, err := cc.getClient()
+	if err != nil {
+		return err
 	}
-	return cc.getClient().IncrementInt(k, 1)
+	return client.Set(key, value)
 }
 
-func (cc CacheClient) IncrementInt8WithExpiration(k string, d time.Duration) (int8, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	_, b := cc.Get(k)
-	if !b {
-		cc.SetWithExpiration(k, int8(0), d)
+func (cc CacheClient) Delete(key string) error {
+	client, err := cc.getClient()
+	if err != nil {
+		return err
 	}
-	return cc.getClient().IncrementInt8(k, 1)
+	return client.Delete(key)
 }
 
-func (cc CacheClient) IncrementInt16WithExpiration(k string, d time.Duration) (int16, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	_, b := cc.Get(k)
-	if !b {
-		cc.SetWithExpiration(k, int16(0), d)
+func (cc CacheClient) Exist(key string) (bool, error) {
+	client, err := cc.getClient()
+	if err != nil {
+		return false, err
 	}
-	return cc.getClient().IncrementInt16(k, 1)
+	body, err := client.Get(key)
+	if err != nil {
+		return false, err
+	}
+	return body != nil, nil
 }
 
-func (cc CacheClient) IncrementInt32WithExpiration(k string, d time.Duration) (int32, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	_, b := cc.Get(k)
-	if !b {
-		cc.SetWithExpiration(k, int32(0), d)
+func (cc CacheClient) IncrementInt(key string) (int, error) {
+	index, err := cc.IncrementInt64(key)
+	if err != nil {
+		return 0, nil
 	}
-	return cc.getClient().IncrementInt32(k, 1)
+	return int(index), nil
 }
 
-func (cc CacheClient) IncrementInt64WithExpiration(k string, d time.Duration) (int64, error) {
+func (cc CacheClient) IncrementInt64(key string) (int64, error) {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
-	_, b := cc.Get(k)
-	if !b {
-		cc.SetWithExpiration(k, int64(0), d)
+	client, err := cc.getClient()
+	if err != nil {
+		return 0, err
 	}
-	return cc.getClient().IncrementInt64(k, 1)
+	body, err := client.Get(key)
+	if err != nil {
+		return 0, err
+	}
+	var index int64 = 0
+	if body != nil {
+		index = int64(binary.BigEndian.Uint64(body))
+	}
+	indexByte := make([]byte, index+1)
+	err = client.Set(key, indexByte)
+	if err != nil {
+		return 0, err
+	}
+	return index, nil
 }

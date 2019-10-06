@@ -1,22 +1,40 @@
 package cacheclient
 
-import "time"
+import (
+	"github.com/allegro/bigcache"
+	"time"
+)
 
 type Config struct {
-	expiration      time.Duration
-	cleanupInterval time.Duration
+	shards             int
+	lifeWindow         time.Duration
+	cleanWindow        time.Duration
+	maxEntriesInWindow int
+	maxEntrySize       int
+	verbose            bool
+	hardMaxCacheSize   int
+	logger             bigcache.Logger
 }
+
+//type Config struct {
+//	shards             int
+//	lifeWindow         time.Duration
+//	cleanWindow        time.Duration
+//	maxEntriesInWindow int
+//	maxEntrySize       int
+//	verbose            bool
+//	hasher             bigcache.Hasher
+//	hardMaxCacheSize   int
+//	onRemove           func(key string, entry []byte)
+//	onRemoveWithReason func(key string, entry []byte, reason bigcache.RemoveReason)
+//	onRemoveFilter     int
+//	logger             bigcache.Logger
+//}
 
 type Option func(*Config)
 
-func Expiration(expiration time.Duration) Option {
+func Shards(shards int) Option {
 	return func(c *Config) {
-		c.expiration = expiration
-	}
-}
-
-func CleanupInterval(cleanupInterval time.Duration) Option {
-	return func(c *Config) {
-		c.cleanupInterval = cleanupInterval
+		c.shards = shards
 	}
 }
