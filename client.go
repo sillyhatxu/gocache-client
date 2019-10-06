@@ -1,4 +1,4 @@
-package client
+package cacheclient
 
 import (
 	"github.com/patrickmn/go-cache"
