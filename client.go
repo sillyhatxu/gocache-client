@@ -1,10 +1,10 @@
 package cacheclient
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/allegro/bigcache"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -12,7 +12,7 @@ import (
 const (
 	defaultShards             = 2048
 	defaultLifeWindow         = 24 * time.Hour
-	defaultCleanWindow        = 12 * time.Hour
+	defaultCleanWindow        = 48 * time.Hour
 	defaultMaxEntriesInWindow = 1000 * 10 * 60
 	defaultMaxEntrySize       = 500
 	defaultVerbose            = true
@@ -111,6 +111,9 @@ func (cc CacheClient) GetObj(key string, value interface{}) error {
 	if err != nil {
 		return err
 	}
+	if body == nil {
+		return nil
+	}
 	err = json.Unmarshal(body, &value)
 	if err != nil {
 		return err
@@ -123,7 +126,13 @@ func (cc CacheClient) Get(key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.Get(key)
+	body, err := client.Get(key)
+	if err != nil && err == bigcache.ErrEntryNotFound {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func (cc CacheClient) Set(key string, value []byte) error {
@@ -145,15 +154,19 @@ func (cc CacheClient) Delete(key string) error {
 }
 
 func (cc CacheClient) Exist(key string) (bool, error) {
-	client, err := cc.getClient()
-	if err != nil {
-		return false, err
-	}
-	body, err := client.Get(key)
+	body, err := cc.Get(key)
 	if err != nil {
 		return false, err
 	}
 	return body != nil, nil
+}
+
+func (cc CacheClient) Iterator() (*bigcache.EntryInfoIterator, error) {
+	client, err := cc.getClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.Iterator(), nil
 }
 
 func (cc CacheClient) IncrementInt(key string) (int, error) {
@@ -171,16 +184,24 @@ func (cc CacheClient) IncrementInt64(key string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	exist := true
 	body, err := client.Get(key)
-	if err != nil {
+	if err != nil && err == bigcache.ErrEntryNotFound {
+		exist = false
+	} else if err != nil {
 		return 0, err
 	}
 	var index int64 = 0
-	if body != nil {
-		index = int64(binary.BigEndian.Uint64(body))
+	if exist {
+		n, err := strconv.ParseInt(string(body), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		index = n
 	}
-	indexByte := make([]byte, index+1)
-	err = client.Set(key, indexByte)
+	index++
+	indexSrc := strconv.FormatInt(index, 10)
+	err = client.Set(key, []byte(indexSrc))
 	if err != nil {
 		return 0, err
 	}
